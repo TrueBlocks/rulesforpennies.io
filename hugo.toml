@@ -1,0 +1,4 @@
+baseURL = 'https://rulesforpennies.ai/'
+languageCode = 'en-us'
+title = 'Rules for Pennies'
+disableKinds = ['taxonomy', 'term']

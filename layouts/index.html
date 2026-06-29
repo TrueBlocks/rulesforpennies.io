@@ -1,0 +1,67 @@
+{{ define "main" }}
+<header>
+  <h1><span class="title-accent">Ask</span> the Arbiter</h1>
+  <p class="subtitle">The sole and final authority on penny-related jurisprudence</p>
+</header>
+
+<div class="page-layout">
+  <main>
+    <section class="ask-section">
+      <h2>Submit Your Petition</h2>
+      <p class="instructions">Describe the penny encounter. Where were you? What did you see? What is the orientation of the coin? The arbiter will render a ruling.</p>
+      <textarea id="situation" placeholder="I was walking down Locust Street and spotted a penny near the curb. It appeared to be tails up, but the sun was in my eyes and I couldn't be certain..."></textarea>
+      <div class="submit-row">
+        <span class="char-count" id="char-count">0 / 2000</span>
+        <button class="submit-btn" id="submit-btn" disabled>Request a Ruling</button>
+      </div>
+      <div class="error-msg" id="error-msg"></div>
+    </section>
+
+    <div class="loading" id="loading">The arbiter is deliberating&hellip;</div>
+
+    <section class="ruling-section" id="ruling-section">
+      <div class="ruling-header">
+        <h2>Official Ruling</h2>
+        <span class="seal">&#9878;</span>
+      </div>
+      <div class="ruling-text" id="ruling-text"></div>
+      <div class="ruling-footer">
+        <button class="suggest-btn" id="suggest-btn" style="display:none;">Suggest a Rule</button>
+        <a href="https://rules-for-pennies.stonylanepress.com">Consult the Official Code &rarr;</a>
+      </div>
+    </section>
+  </main>
+
+  <aside class="sidebar-panels">
+    <div class="history-panel" id="history-panel">
+      <h3>Prior Rulings</h3>
+      <ul id="history-list"></ul>
+    </div>
+    <div class="suggestions-panel" id="suggestions-panel">
+      <h3>Proposed Rules</h3>
+      <ul id="suggestions-list"></ul>
+    </div>
+  </aside>
+</div>
+
+<div class="modal-overlay" id="suggest-modal">
+  <div class="modal-box">
+    <h3>Suggest a Rule</h3>
+    <label for="suggest-situation">Your scenario:</label>
+    <textarea id="suggest-situation" rows="3"></textarea>
+    <label for="suggest-rationale">Why should this be a rule?</label>
+    <textarea id="suggest-rationale" rows="3" placeholder="Explain why this penny situation deserves official guidance..."></textarea>
+    <div class="modal-warning" id="suggest-warning" style="display:none;"></div>
+    <div class="modal-buttons">
+      <button id="suggest-cancel" class="btn-cancel">Cancel</button>
+      <button id="suggest-submit" class="submit-btn">Submit</button>
+    </div>
+  </div>
+</div>
+
+<footer>
+  <p><a href="https://rules-for-pennies.stonylanepress.com">Rules for Pennies: The Official Code</a></p>
+  <p style="margin-top: 0.5rem;">&copy; Thomas Jay Rush. All rights reserved.</p>
+</footer>
+<div id="tooltip-box"></div>
+{{ end }}
