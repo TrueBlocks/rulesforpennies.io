@@ -7,7 +7,9 @@ CREATE TABLE IF NOT EXISTS rules (
     keywords TEXT NOT NULL DEFAULT '',
     category TEXT NOT NULL DEFAULT '',
     recorded_date TEXT,
-    is_foundational INTEGER NOT NULL DEFAULT 0
+    is_foundational INTEGER NOT NULL DEFAULT 0,
+    is_section_header INTEGER NOT NULL DEFAULT 0,
+    content_hash TEXT NOT NULL DEFAULT ''
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS rules_fts USING fts5(

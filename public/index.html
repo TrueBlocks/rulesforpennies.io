@@ -8,6 +8,9 @@
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+  <div id="arbiter-status" class="arbiter-status arbiter-status--checking" aria-live="polite">
+    Checking for the Arbiter&hellip;
+  </div>
   
 <header>
   <h1><span class="title-accent">Ask</span> the Arbiter</h1>
@@ -35,6 +38,7 @@
         <span class="seal">&#9878;</span>
       </div>
       <div class="ruling-text" id="ruling-text"></div>
+      <div class="throttle-note" id="throttle-note" style="display:none;"></div>
       <div class="ruling-footer">
         <button class="suggest-btn" id="suggest-btn" style="display:none;">Suggest a Rule</button>
         <a href="https://rules-for-pennies.stonylanepress.com">Consult the Official Code &rarr;</a>

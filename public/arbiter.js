@@ -25,10 +25,97 @@
   function getSessionToken() {
     var token = localStorage.getItem("arbiter_session");
     if (!token) {
-      token = crypto.randomUUID();
+      if (crypto && typeof crypto.randomUUID === "function") {
+        token = crypto.randomUUID();
+      } else {
+        token = "sess-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10);
+      }
       localStorage.setItem("arbiter_session", token);
     }
     return token;
+  }
+
+  var backendAvailable = false;
+
+  function setStatus(connected, message) {
+    var el = document.getElementById("arbiter-status");
+    if (!el) return;
+    backendAvailable = connected;
+    el.classList.remove("arbiter-status--checking", "arbiter-status--ok", "arbiter-status--error");
+    if (connected) {
+      el.classList.add("arbiter-status--ok");
+      el.textContent = message || "Arbiter is listening.";
+    } else {
+      el.classList.add("arbiter-status--error");
+      el.textContent = message || "Arbiter is unreachable. Rulings cannot be rendered.";
+    }
+  }
+
+  function checkBackend() {
+    return new Promise(function (resolve) {
+      var controller = new AbortController();
+      var timer = setTimeout(function () {
+        controller.abort();
+        console.error("[arbiter] health check timed out");
+        resolve(false);
+      }, 3000);
+
+      fetch(API_BASE + "/api/health", { signal: controller.signal })
+        .then(function (resp) {
+          clearTimeout(timer);
+          if (!resp.ok) {
+            console.error("[arbiter] health check returned HTTP", resp.status);
+          }
+          resolve(resp.ok);
+        })
+        .catch(function (err) {
+          clearTimeout(timer);
+          console.error("[arbiter] health check failed:", err.message || err);
+          resolve(false);
+        });
+    });
+  }
+
+  function initializeApp() {
+    setStatus(false, "Checking for the Arbiter…");
+    checkBackend().then(function (ok) {
+      if (!ok) {
+        setStatus(false, "Arbiter is unreachable: arbiterd is not running. Rulings cannot be rendered.");
+        var historyList = document.getElementById("history-list");
+        if (historyList) {
+          historyList.innerHTML = "<li class='arbiter-unavailable'>Prior rulings unavailable: Arbiter is not running.</li>";
+        }
+        var suggestionsPanel = document.getElementById("suggestions-panel");
+        if (suggestionsPanel) {
+          suggestionsPanel.style.display = "none";
+        }
+        return;
+      }
+      loadRulings(true);
+    });
+  }
+
+  var deliberationMessages = [
+    "The arbiter is reviewing the docket…",
+    "Consulting the Official Code…",
+    "Weighing precedent and circumstance…",
+    "Deliberating with appropriate gravity…",
+    "The docket is crowded; taking a short breather…",
+    "Preparing the ruling…"
+  ];
+
+  function startDeliberationAnimation(loadingEl) {
+    var index = 0;
+    loadingEl.textContent = deliberationMessages[0];
+    return setInterval(function () {
+      index = (index + 1) % deliberationMessages.length;
+      loadingEl.textContent = deliberationMessages[index];
+    }, 2500);
+  }
+
+  function stopDeliberationAnimation(intervalId, loadingEl) {
+    clearInterval(intervalId);
+    loadingEl.textContent = "The arbiter is deliberating…";
   }
 
   function formatRuling(text, rules) {
@@ -61,12 +148,19 @@
   }
 
   function loadRulings(autoShow) {
+    var historyList = document.getElementById("history-list");
+    var suggestionsPanel = document.getElementById("suggestions-panel");
+    var suggestionsList = document.getElementById("suggestions-list");
+
     fetch(API_BASE + "/api/rulings")
-      .then(function (resp) { return resp.json(); })
+      .then(function (resp) {
+        if (!resp.ok) {
+          throw new Error("HTTP " + resp.status);
+        }
+        return resp.json();
+      })
       .then(function (items) {
-        var historyList = document.getElementById("history-list");
-        var suggestionsPanel = document.getElementById("suggestions-panel");
-        var suggestionsList = document.getElementById("suggestions-list");
+        setStatus(true, "Arbiter is listening.");
         historyList.innerHTML = "";
         suggestionsList.innerHTML = "";
 
@@ -137,7 +231,12 @@
           }
         }
       })
-      .catch(function () {});
+      .catch(function (err) {
+        console.error("[arbiter] failed to load rulings:", err.message || err);
+        setStatus(false, "Arbiter is unreachable: arbiterd is not running. Rulings cannot be rendered.");
+        historyList.innerHTML = "<li class='arbiter-unavailable'>Prior rulings unavailable: Arbiter is not running.</li>";
+        suggestionsPanel.style.display = "none";
+      });
   }
 
   function showRuling(item) {
@@ -171,7 +270,7 @@
     var rulingSection = document.getElementById("ruling-section");
     var rulingText = document.getElementById("ruling-text");
 
-    loadRulings(true);
+    initializeApp();
 
     textarea.addEventListener("input", function () {
       var len = textarea.value.length;
@@ -187,6 +286,20 @@
       loading.classList.add("visible");
       errorMsg.classList.remove("visible");
       rulingSection.classList.remove("visible");
+      var deliberationInterval = startDeliberationAnimation(loading);
+
+      console.log("[arbiter] submit clicked, backendAvailable=" + backendAvailable);
+
+      if (!backendAvailable) {
+        console.error("[arbiter] refusing to submit: backend is not available");
+        stopDeliberationAnimation(deliberationInterval, loading);
+        loading.classList.remove("visible");
+        setStatus(false, "Arbiter is unreachable: arbiterd is not running. Rulings cannot be rendered.");
+        errorMsg.textContent = "The Arbiter cannot hear your petition: arbiterd is not running.";
+        errorMsg.classList.add("visible");
+        submitBtn.disabled = false;
+        return;
+      }
 
       var headers = {
         "Content-Type": "application/json",
@@ -196,13 +309,21 @@
         headers["X-Admin-Token"] = ADMIN_SECRET;
       }
 
+      console.log("[arbiter] POST /api/ruling");
       fetch(API_BASE + "/api/ruling", {
         method: "POST",
         headers: headers,
         body: JSON.stringify({ situation: situation })
       })
-        .then(function (resp) { return resp.json(); })
+        .then(function (resp) {
+          console.log("[arbiter] ruling response HTTP", resp.status);
+          if (!resp.ok) {
+            throw new Error("HTTP " + resp.status);
+          }
+          return resp.json();
+        })
         .then(function (data) {
+          stopDeliberationAnimation(deliberationInterval, loading);
           loading.classList.remove("visible");
           if (data.error) {
             errorMsg.textContent = data.error;
@@ -210,34 +331,46 @@
             submitBtn.disabled = false;
             return;
           }
-          rulingText.innerHTML = formatRuling(data.ruling, data.rules);
-          rulingSection.classList.add("visible");
-          submitBtn.disabled = false;
+            rulingText.innerHTML = formatRuling(data.ruling, data.rules);
+            rulingSection.classList.add("visible");
+            submitBtn.disabled = false;
 
-          // Show "Suggest a Rule" button if deflected
-          var suggestBtn = document.getElementById("suggest-btn");
-          if (data.deflected) {
-            suggestBtn.style.display = "inline-block";
-            suggestBtn.setAttribute("data-situation", situation);
-            suggestBtn.setAttribute("data-slug", data.slug || "");
-          } else {
-            suggestBtn.style.display = "none";
-          }
+            var throttleNote = document.getElementById("throttle-note");
+            if (data.throttled) {
+              throttleNote.textContent = "This ruling was delayed briefly due to high court volume.";
+              throttleNote.style.display = "block";
+            } else {
+              throttleNote.textContent = "";
+              throttleNote.style.display = "none";
+            }
 
-          // Update hash for deep link
-          if (data.slug) {
-            window.history.replaceState(null, '', '#' + data.slug);
-          }
+            // Show "Suggest a Rule" button if deflected
+            var suggestBtn = document.getElementById("suggest-btn");
+            if (data.deflected) {
+              suggestBtn.style.display = "inline-block";
+              suggestBtn.setAttribute("data-situation", situation);
+              suggestBtn.setAttribute("data-slug", data.slug || "");
+            } else {
+              suggestBtn.style.display = "none";
+            }
 
-          // Reload rulings list from server
-          loadRulings(false);
-        })
-        .catch(function () {
-          loading.classList.remove("visible");
-          errorMsg.textContent = "The arbiter is temporarily unreachable. Please try again.";
-          errorMsg.classList.add("visible");
-          submitBtn.disabled = false;
-        });
+            // Update hash for deep link
+            if (data.slug) {
+              window.history.replaceState(null, '', '#' + data.slug);
+            }
+
+            // Reload rulings list from server
+            loadRulings(false);
+          })
+          .catch(function (err) {
+            console.error("[arbiter] ruling request failed:", err.message || err);
+            stopDeliberationAnimation(deliberationInterval, loading);
+            loading.classList.remove("visible");
+            setStatus(false, "Arbiter is unreachable: arbiterd is not running. Rulings cannot be rendered.");
+            errorMsg.textContent = "The Arbiter could not render a ruling: " + (err.message || "arbiterd is not running.");
+            errorMsg.classList.add("visible");
+            submitBtn.disabled = false;
+          });
     });
 
     // Suggest button opens modal
@@ -265,15 +398,34 @@
       }
       warning.style.display = "none";
 
+      if (!backendAvailable) {
+        console.error("[arbiter] refusing to submit suggestion: backend is not available");
+        warning.textContent = "Arbiter is unreachable: arbiterd is not running.";
+        warning.style.display = "block";
+        return;
+      }
+
       var headers = { "Content-Type": "application/json", "X-Session-Token": getSessionToken() };
       fetch(API_BASE + "/api/suggest", {
         method: "POST",
         headers: headers,
         body: JSON.stringify({ slug: document.getElementById("suggest-btn").getAttribute("data-slug") || "", rationale: rationale })
-      }).then(function (resp) { return resp.json(); }).then(function () {
-        document.getElementById("suggest-modal").classList.remove("visible");
-        loadRulings(false);
-      });
+      })
+        .then(function (resp) {
+          if (!resp.ok) {
+            throw new Error("HTTP " + resp.status);
+          }
+          return resp.json();
+        })
+        .then(function () {
+          document.getElementById("suggest-modal").classList.remove("visible");
+          loadRulings(false);
+        })
+        .catch(function (err) {
+          console.error("[arbiter] suggestion request failed:", err.message || err);
+          warning.textContent = "Could not submit suggestion: " + (err.message || "arbiterd is not running.");
+          warning.style.display = "block";
+        });
     });
 
     // Close modal on backdrop click

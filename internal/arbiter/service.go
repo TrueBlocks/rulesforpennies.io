@@ -58,6 +58,7 @@ type rulingResponse struct {
 	Cost      float64        `json:"cost"`
 	Deflected bool           `json:"deflected,omitempty"`
 	Slug      string         `json:"slug,omitempty"`
+	Throttled bool           `json:"throttled,omitempty"`
 }
 
 type errorResponse struct {
@@ -66,7 +67,9 @@ type errorResponse struct {
 }
 
 func (s *Service) HandleRuling(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	sessionToken := r.Header.Get("X-Session-Token")
+	log.Printf("[request] start from session=%s at %s", sessionToken, start.Format(time.RFC3339Nano))
 	if sessionToken == "" {
 		writeError(w, http.StatusBadRequest, "missing session token", "missing_token")
 		return
@@ -86,9 +89,10 @@ func (s *Service) HandleRuling(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "situation too long (max 2000 characters)", "too_long")
 		return
 	}
+	log.Printf("[request] decoded situation=%q len=%d elapsed=%s", req.Situation, len(req.Situation), time.Since(start))
 
 	if blocked, reason := checkInputFilters(req.Situation); blocked {
-		log.Printf("blocked input from %s: %s", sessionToken, reason)
+		log.Printf("[request] blocked input from %s: %s", sessionToken, reason)
 		writeJSON(w, http.StatusOK, rulingResponse{
 			Ruling:    "The arbiter declines to entertain motions that fall outside the scope of penny-related jurisprudence. The petitioner is reminded that this body's jurisdiction is limited to currency encounters as defined in the Official Code, available at https://rules-for-pennies.stonylanepress.com",
 			Deflected: true,
@@ -100,7 +104,9 @@ func (s *Service) HandleRuling(w http.ResponseWriter, r *http.Request) {
 	isAdmin := adminHeader == adminToken
 
 	status := s.limiter.Check(sessionToken)
+	log.Printf("[request] limiter status soft=%v hard=%v remaining=%d elapsed=%s", status.SoftCapped, status.HardCapped, status.Remaining, time.Since(start))
 	if status.HardCapped && !isAdmin {
+		log.Printf("[request] hard cap hit for session=%s", sessionToken)
 		writeJSON(w, http.StatusOK, rulingResponse{
 			Ruling: "The arbiter has retired for the day. Court reconvenes tomorrow. In the interim, the petitioner is directed to consult the Official Code at https://rules-for-pennies.stonylanepress.com — wherein one may find the complete and unabridged text of every ruling, provision, and amendment herein referenced.",
 		})
@@ -109,20 +115,23 @@ func (s *Service) HandleRuling(w http.ResponseWriter, r *http.Request) {
 
 	rules, err := s.rulesDB.Search(req.Situation, 5)
 	if err != nil {
-		log.Printf("rules search error: %v", err)
+		log.Printf("[request] rules search error: %v", err)
 		rules, _ = s.rulesDB.Foundational()
 	}
+	log.Printf("[request] rules search returned %d rules elapsed=%s", len(rules), time.Since(start))
 
 	prompt := s.buildPrompt(rules)
-	ruling, cost, err := s.callOpenAI(prompt, req.Situation, status.SoftCapped)
+	log.Printf("[request] calling OpenAI soft=%v elapsed=%s", status.SoftCapped, time.Since(start))
+	ruling, cost, throttled, err := s.callOpenAI(prompt, req.Situation, status.SoftCapped)
 	if err != nil {
-		log.Printf("OpenAI error: %v", err)
+		log.Printf("[request] OpenAI error after %s: %v", time.Since(start), err)
 		writeError(w, http.StatusInternalServerError, "the arbiter is temporarily indisposed", "api_error")
 		return
 	}
+	log.Printf("[request] OpenAI returned cost=%.6f throttled=%v elapsed=%s", cost, throttled, time.Since(start))
 
 	if leaked := checkOutputFilters(ruling); leaked {
-		log.Printf("output filter triggered for session %s", sessionToken)
+		log.Printf("[request] output filter triggered for session %s", sessionToken)
 		ruling = "The arbiter's ruling has been sealed pending review. The petitioner is directed to the Official Code at https://rules-for-pennies.stonylanepress.com for authoritative guidance on this matter."
 	}
 
@@ -155,7 +164,9 @@ func (s *Service) HandleRuling(w http.ResponseWriter, r *http.Request) {
 		Cost:      cost,
 		Deflected: deflected,
 		Slug:      slug,
+		Throttled: throttled,
 	})
+	log.Printf("[request] response sent deflected=%v throttled=%v total_elapsed=%s", deflected, throttled, time.Since(start))
 }
 
 func (s *Service) buildPrompt(rules []rulesdb.Rule) string {
@@ -163,9 +174,13 @@ func (s *Service) buildPrompt(rules []rulesdb.Rule) string {
 	return strings.Replace(s.promptTemplate, "{{RULES_CORPUS}}", corpus, 1)
 }
 
-func (s *Service) callOpenAI(systemPrompt, situation string, addDelay bool) (string, float64, error) {
+func (s *Service) callOpenAI(systemPrompt, situation string, addDelay bool) (string, float64, bool, error) {
+	start := time.Now()
+	throttled := false
 	if addDelay {
-		time.Sleep(10 * time.Second)
+		throttled = true
+		log.Printf("[openai] soft cap reached: applying 500ms throttle")
+		time.Sleep(500 * time.Millisecond)
 	}
 
 	body := map[string]any{
@@ -180,29 +195,33 @@ func (s *Service) callOpenAI(systemPrompt, situation string, addDelay bool) (str
 
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
-		return "", 0, fmt.Errorf("marshal request: %w", err)
+		return "", 0, false, fmt.Errorf("marshal request: %w", err)
 	}
+	log.Printf("[openai] request body ready len=%d elapsed=%s", len(jsonBody), time.Since(start))
 
 	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewReader(jsonBody))
 	if err != nil {
-		return "", 0, fmt.Errorf("create request: %w", err)
+		return "", 0, false, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+s.apiKey)
 
+	apiStart := time.Now()
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return "", 0, fmt.Errorf("api call: %w", err)
+		return "", 0, false, fmt.Errorf("api call: %w", err)
 	}
 	defer resp.Body.Close()
+	log.Printf("[openai] HTTP response status=%d elapsed=%s", resp.StatusCode, time.Since(apiStart))
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", 0, fmt.Errorf("read response: %w", err)
+		return "", 0, false, fmt.Errorf("read response: %w", err)
 	}
+	log.Printf("[openai] response body read len=%d elapsed=%s", len(respBody), time.Since(apiStart))
 
 	if resp.StatusCode != http.StatusOK {
-		return "", 0, fmt.Errorf("api returned %d: %s", resp.StatusCode, string(respBody))
+		return "", 0, false, fmt.Errorf("api returned %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result struct {
@@ -217,11 +236,11 @@ func (s *Service) callOpenAI(systemPrompt, situation string, addDelay bool) (str
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(respBody, &result); err != nil {
-		return "", 0, fmt.Errorf("parse response: %w", err)
+		return "", 0, false, fmt.Errorf("parse response: %w", err)
 	}
 
 	if len(result.Choices) == 0 {
-		return "", 0, fmt.Errorf("no choices in response")
+		return "", 0, false, fmt.Errorf("no choices in response")
 	}
 
 	// GPT-4o pricing: $2.50/1M input, $10.00/1M output
@@ -229,7 +248,9 @@ func (s *Service) callOpenAI(systemPrompt, situation string, addDelay bool) (str
 	outputCost := float64(result.Usage.CompletionTokens) * 10.00 / 1_000_000
 	totalCost := inputCost + outputCost
 
-	return result.Choices[0].Message.Content, totalCost, nil
+	log.Printf("[openai] completed tokens_in=%d tokens_out=%d cost=%.6f total_elapsed=%s", result.Usage.PromptTokens, result.Usage.CompletionTokens, totalCost, time.Since(start))
+
+	return result.Choices[0].Message.Content, totalCost, throttled, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
