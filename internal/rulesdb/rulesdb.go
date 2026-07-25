@@ -10,13 +10,16 @@ import (
 )
 
 type Rule struct {
-	ID           int
-	Code         string
-	Title        string
-	FullText     string
-	Summary      string
-	Category     string
-	Foundational bool
+	ID             int
+	Code           string
+	Title          string
+	FullText       string
+	Summary        string
+	Category       string
+	RecordedDate   string
+	Foundational   bool
+	SectionHeader  bool
+	ContentHash    string
 }
 
 type DB struct {

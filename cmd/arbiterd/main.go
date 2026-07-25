@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"log"
 	"net/http"
@@ -19,8 +20,10 @@ func main() {
 	dataDir := flag.String("data", "", "data directory (default: ~/.local/share/trueblocks/arbiterd)")
 	dbFile := flag.String("db", "", "path to rules.db SQLite database")
 	promptFile := flag.String("prompt", "", "path to system prompt template file")
+	apiKeyFile := flag.String("api-key-file", "", "path to file containing OPENAI_API_KEY")
 	dailyCap := flag.Float64("daily-cap", 10.0, "daily spend cap in USD")
 	devMode := flag.Bool("dev", false, "enable dev mode (CORS for localhost)")
+	logFile := flag.String("log", "", "path to log file (default: stderr)")
 	flag.Parse()
 
 	if *dataDir == "" {
@@ -31,9 +34,27 @@ func main() {
 		log.Fatalf("cannot create data dir: %v", err)
 	}
 
+	if *logFile != "" {
+		f, err := os.OpenFile(*logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			log.Fatalf("cannot open log file: %v", err)
+		}
+		defer f.Close()
+		log.SetOutput(f)
+	}
+
 	apiKey := os.Getenv("OPENAI_API_KEY")
+	if *apiKeyFile != "" {
+		keyFromFile, err := readAPIKeyFile(*apiKeyFile)
+		if err != nil {
+			log.Fatalf("cannot read API key file: %v", err)
+		}
+		if keyFromFile != "" {
+			apiKey = keyFromFile
+		}
+	}
 	if apiKey == "" {
-		log.Fatal("OPENAI_API_KEY environment variable is required")
+		log.Fatal("OPENAI_API_KEY is required (set env var or use -api-key-file)")
 	}
 
 	if *dbFile == "" {
@@ -98,4 +119,29 @@ func corsMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func readAPIKeyFile(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "OPENAI_API_KEY=") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "OPENAI_API_KEY=")), nil
+		}
+		// also accept a bare key as the first non-empty line
+		return line, nil
+	}
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+	return "", nil
 }
