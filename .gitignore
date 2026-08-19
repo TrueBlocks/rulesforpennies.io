@@ -1,2 +1,4 @@
 .DS_Store
 /freshen
+/arbiterd
+cmd/arbiterd/arbiterd

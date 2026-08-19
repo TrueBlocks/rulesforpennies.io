@@ -1,9 +1,7 @@
 (function () {
   "use strict";
 
-  var API_BASE = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-    ? "http://localhost:9092"
-    : "";
+  var API_BASE = "";
   var ADMIN_KEY = "arbiter_admin";
   var ADMIN_SECRET = "penny1793";
 
@@ -60,7 +58,7 @@
         resolve(false);
       }, 3000);
 
-      fetch(API_BASE + "/api/health", { signal: controller.signal })
+      fetch(API_BASE + "/health", { signal: controller.signal })
         .then(function (resp) {
           clearTimeout(timer);
           if (!resp.ok) {
@@ -152,7 +150,7 @@
     var suggestionsPanel = document.getElementById("suggestions-panel");
     var suggestionsList = document.getElementById("suggestions-list");
 
-    fetch(API_BASE + "/api/rulings")
+    fetch(API_BASE + "/rulings")
       .then(function (resp) {
         if (!resp.ok) {
           throw new Error("HTTP " + resp.status);
@@ -257,7 +255,7 @@
   function deleteRuling(id) {
     document.getElementById("tooltip-box").style.display = "none";
     var headers = { "X-Admin-Token": ADMIN_SECRET };
-    fetch(API_BASE + "/api/rulings/" + id, { method: "DELETE", headers: headers })
+    fetch(API_BASE + "/rulings/" + id, { method: "DELETE", headers: headers })
       .then(function () { loadRulings(false); });
   }
 
@@ -309,8 +307,8 @@
         headers["X-Admin-Token"] = ADMIN_SECRET;
       }
 
-      console.log("[arbiter] POST /api/ruling");
-      fetch(API_BASE + "/api/ruling", {
+      console.log("[arbiter] POST /ruling");
+      fetch(API_BASE + "/ruling", {
         method: "POST",
         headers: headers,
         body: JSON.stringify({ situation: situation })
@@ -406,7 +404,7 @@
       }
 
       var headers = { "Content-Type": "application/json", "X-Session-Token": getSessionToken() };
-      fetch(API_BASE + "/api/suggest", {
+      fetch(API_BASE + "/suggest", {
         method: "POST",
         headers: headers,
         body: JSON.stringify({ slug: document.getElementById("suggest-btn").getAttribute("data-slug") || "", rationale: rationale })

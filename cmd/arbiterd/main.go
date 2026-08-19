@@ -1,28 +1,36 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/TrueBlocks/rulesforpennies.io/internal/arbiter"
 	"github.com/TrueBlocks/rulesforpennies.io/internal/ratelimit"
 	"github.com/TrueBlocks/rulesforpennies.io/internal/rulesdb"
 	"github.com/TrueBlocks/rulesforpennies.io/internal/suggestions"
+	"github.com/TrueBlocks/trueblocks-art/packages/appd"
 	"github.com/TrueBlocks/trueblocks-art/packages/creds"
 )
 
 func main() {
-	addr := flag.String("addr", ":9092", "listen address")
+	addr := flag.String("addr", ":8080", "listen address")
 	dataDir := flag.String("data", "", "data directory (default: ~/.local/share/trueblocks/arbiterd)")
 	dbFile := flag.String("db", "", "path to rules.db SQLite database")
 	promptFile := flag.String("prompt", "", "path to system prompt template file")
 	dailyCap := flag.Float64("daily-cap", 10.0, "daily spend cap in USD")
 	devMode := flag.Bool("dev", false, "enable dev mode (CORS for localhost)")
 	logFile := flag.String("log", "", "path to log file (default: stderr)")
+	publicDir := flag.String("public", "", "path to pennies/public static files")
+	appsConfig := flag.String("apps-config", appd.DefaultConfigPath(), "path to apps.json for cross-app nav")
 	flag.Parse()
 
 	if *dataDir == "" {
@@ -61,6 +69,10 @@ func main() {
 		log.Fatalf("cannot read prompt file: %v", err)
 	}
 
+	if *publicDir == "" {
+		log.Fatal("-public flag is required (path to pennies/public)")
+	}
+
 	limiter := ratelimit.New(*dataDir, *dailyCap)
 
 	sgPath := filepath.Join(*dataDir, "suggestions.db")
@@ -73,22 +85,53 @@ func main() {
 	svc := arbiter.New(apiKey, string(promptTemplate), db, limiter, sg)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/ruling", svc.HandleRuling)
-	mux.HandleFunc("POST /api/suggest", svc.HandleSuggest)
-	mux.HandleFunc("GET /api/rulings", svc.HandleListRulings)
-	mux.HandleFunc("DELETE /api/rulings/{id}", svc.HandleDeleteRuling)
-	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
+	if _, err := appd.RegisterNav(mux, *appsConfig); err != nil {
+		log.Fatalf("cannot register nav: %v", err)
+	}
+
+	mux.HandleFunc("POST /ruling", svc.HandleRuling)
+	mux.HandleFunc("POST /suggest", svc.HandleSuggest)
+	mux.HandleFunc("GET /rulings", svc.HandleListRulings)
+	mux.HandleFunc("DELETE /rulings/{id}", svc.HandleDeleteRuling)
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status":"ok","version":"2026-06-29i"}`))
 	})
+
+	// Static files from pennies/public. API routes above take precedence.
+	mux.Handle("/", http.FileServer(http.Dir(*publicDir)))
 
 	var handler http.Handler = mux
 	if *devMode {
 		handler = corsMiddleware(mux)
 	}
 
-	log.Printf("arbiterd listening on %s (dev=%v, cap=$%.2f/day)", *addr, *devMode, *dailyCap)
-	log.Fatal(http.ListenAndServe(*addr, handler))
+	srv := &http.Server{
+		Addr:              *addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+
+	go func() {
+		log.Printf("arbiterd listening on %s (dev=%v, cap=$%.2f/day)", *addr, *devMode, *dailyCap)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("listen error: %v", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("shutting down")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatalf("shutdown error: %v", err)
+	}
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -107,4 +150,3 @@ func corsMiddleware(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
-
