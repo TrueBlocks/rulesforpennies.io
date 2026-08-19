@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"log"
@@ -20,6 +21,14 @@ import (
 	"github.com/TrueBlocks/trueblocks-art/packages/appd"
 	"github.com/TrueBlocks/trueblocks-art/packages/creds"
 )
+
+// paused reports whether arbiterd is held in its paused state. See issue #598: the
+// pennies launchd stack crash-loops and floods its error log, so the daemon answers
+// every request with a notice instead of serving rulings. Set this to false to restore
+// normal service.
+var paused = true
+
+const pausedMessage = "This process is paused. See issue #598"
 
 func main() {
 	addr := flag.String("addr", ":8080", "listen address")
@@ -48,6 +57,11 @@ func main() {
 		}
 		defer f.Close()
 		log.SetOutput(f)
+	}
+
+	if paused {
+		servePaused(*addr)
+		return
 	}
 
 	apiKey := creds.MustGet("OPENAI_API_KEY")
@@ -117,6 +131,54 @@ func main() {
 
 	go func() {
 		log.Printf("arbiterd listening on %s (dev=%v, cap=$%.2f/day)", *addr, *devMode, *dailyCap)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("listen error: %v", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("shutting down")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatalf("shutdown error: %v", err)
+	}
+}
+
+// servePaused answers every method and path with the paused notice. It opens no
+// database, reads no credential, and makes no OpenAI call. See issue #598.
+func servePaused(addr string) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "3600")
+		if strings.Contains(r.Header.Get("Accept"), "application/json") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error": pausedMessage,
+				"code":  "paused",
+			})
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte(pausedMessage + "\n"))
+	})
+
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+
+	go func() {
+		log.Printf("arbiterd paused on %s — %s", addr, pausedMessage)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("listen error: %v", err)
 		}
