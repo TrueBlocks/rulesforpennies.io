@@ -1,11 +1,10 @@
 package arbiter
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
-	"io"
 	"log"
 	"net/http"
 	"regexp"
@@ -16,6 +15,7 @@ import (
 	"github.com/TrueBlocks/rulesforpennies.io/internal/ratelimit"
 	"github.com/TrueBlocks/rulesforpennies.io/internal/rulesdb"
 	"github.com/TrueBlocks/rulesforpennies.io/internal/suggestions"
+	"github.com/TrueBlocks/trueblocks-art/packages/ai"
 )
 
 const adminToken = "penny1793"
@@ -23,22 +23,20 @@ const adminToken = "penny1793"
 var substantiveRuleRe = regexp.MustCompile(`§[2-6]\.\d`)
 
 type Service struct {
-	apiKey         string
+	provider       ai.Provider
 	promptTemplate string
 	rulesDB        *rulesdb.DB
 	limiter        *ratelimit.Limiter
 	suggestions    *suggestions.Store
-	httpClient     *http.Client
 }
 
-func New(apiKey, promptTemplate string, db *rulesdb.DB, limiter *ratelimit.Limiter, sg *suggestions.Store) *Service {
+func New(provider ai.Provider, promptTemplate string, db *rulesdb.DB, limiter *ratelimit.Limiter, sg *suggestions.Store) *Service {
 	return &Service{
-		apiKey:         apiKey,
+		provider:       provider,
 		promptTemplate: promptTemplate,
 		rulesDB:        db,
 		limiter:        limiter,
 		suggestions:    sg,
-		httpClient:     &http.Client{Timeout: 60 * time.Second},
 	}
 }
 
@@ -183,74 +181,18 @@ func (s *Service) callOpenAI(systemPrompt, situation string, addDelay bool) (str
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	body := map[string]any{
-		"model": "gpt-4o",
-		"messages": []map[string]string{
-			{"role": "system", "content": systemPrompt},
-			{"role": "user", "content": situation},
-		},
-		"max_tokens":  500,
-		"temperature": 0.8,
-	}
-
-	jsonBody, err := json.Marshal(body)
-	if err != nil {
-		return "", 0, false, fmt.Errorf("marshal request: %w", err)
-	}
-	log.Printf("[openai] request body ready len=%d elapsed=%s", len(jsonBody), time.Since(start))
-
-	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewReader(jsonBody))
-	if err != nil {
-		return "", 0, false, fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+s.apiKey)
-
-	apiStart := time.Now()
-	resp, err := s.httpClient.Do(req)
+	prompt := systemPrompt + "\n\n" + situation
+	result, err := s.provider.Call(context.Background(), "gpt-4o", prompt, ai.CallOptions{
+		MaxTokens: 500,
+		Timeout:   60 * time.Second,
+	})
 	if err != nil {
 		return "", 0, false, fmt.Errorf("api call: %w", err)
 	}
-	defer resp.Body.Close()
-	log.Printf("[openai] HTTP response status=%d elapsed=%s", resp.StatusCode, time.Since(apiStart))
 
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", 0, false, fmt.Errorf("read response: %w", err)
-	}
-	log.Printf("[openai] response body read len=%d elapsed=%s", len(respBody), time.Since(apiStart))
+	log.Printf("[openai] completed tokens_in=%d tokens_out=%d cost=%.6f total_elapsed=%s", result.InputTokens, result.OutputTokens, result.Cost, time.Since(start))
 
-	if resp.StatusCode != http.StatusOK {
-		return "", 0, false, fmt.Errorf("api returned %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var result struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-		Usage struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
-		} `json:"usage"`
-	}
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return "", 0, false, fmt.Errorf("parse response: %w", err)
-	}
-
-	if len(result.Choices) == 0 {
-		return "", 0, false, fmt.Errorf("no choices in response")
-	}
-
-	// GPT-4o pricing: $2.50/1M input, $10.00/1M output
-	inputCost := float64(result.Usage.PromptTokens) * 2.50 / 1_000_000
-	outputCost := float64(result.Usage.CompletionTokens) * 10.00 / 1_000_000
-	totalCost := inputCost + outputCost
-
-	log.Printf("[openai] completed tokens_in=%d tokens_out=%d cost=%.6f total_elapsed=%s", result.Usage.PromptTokens, result.Usage.CompletionTokens, totalCost, time.Since(start))
-
-	return result.Choices[0].Message.Content, totalCost, throttled, nil
+	return result.Content, result.Cost, throttled, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

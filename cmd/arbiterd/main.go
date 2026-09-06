@@ -17,8 +17,8 @@ import (
 	"github.com/TrueBlocks/rulesforpennies.io/internal/ratelimit"
 	"github.com/TrueBlocks/rulesforpennies.io/internal/rulesdb"
 	"github.com/TrueBlocks/rulesforpennies.io/internal/suggestions"
+	"github.com/TrueBlocks/trueblocks-art/packages/ai"
 	"github.com/TrueBlocks/trueblocks-art/packages/appd"
-	"github.com/TrueBlocks/trueblocks-art/packages/creds"
 )
 
 func main() {
@@ -50,7 +50,11 @@ func main() {
 		log.SetOutput(f)
 	}
 
-	apiKey := creds.MustGet("OPENAI_API_KEY")
+	cfg, err := ai.LoadSharedConfig()
+	if err != nil {
+		log.Fatalf("cannot load AI config: %v", err)
+	}
+	provider := cfg.NewOpenAI()
 
 	if *dbFile == "" {
 		log.Fatal("-db flag is required (path to rules.db)")
@@ -82,7 +86,7 @@ func main() {
 	}
 	defer sg.Close()
 
-	svc := arbiter.New(apiKey, string(promptTemplate), db, limiter, sg)
+	svc := arbiter.New(provider, string(promptTemplate), db, limiter, sg)
 
 	mux := http.NewServeMux()
 	if _, err := appd.RegisterNav(mux, *appsConfig); err != nil {

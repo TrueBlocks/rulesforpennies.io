@@ -5,7 +5,6 @@ go 1.25.9
 require (
 	github.com/TrueBlocks/trueblocks-art/packages/ai v0.0.0-00010101000000-000000000000
 	github.com/TrueBlocks/trueblocks-art/packages/appd v0.0.0-00010101000000-000000000000
-	github.com/TrueBlocks/trueblocks-art/packages/creds v0.0.0
 	modernc.org/sqlite v1.52.0
 )
 
@@ -16,6 +15,7 @@ replace github.com/TrueBlocks/trueblocks-art/packages/creds => ../packages/creds
 replace github.com/TrueBlocks/trueblocks-art/packages/appd => ../packages/appd
 
 require (
+	github.com/TrueBlocks/trueblocks-art/packages/creds v0.0.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
