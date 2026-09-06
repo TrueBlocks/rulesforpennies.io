@@ -123,8 +123,8 @@ type stats struct {
 func main() {
 	rawFile := flag.String("raw", "", "path to raw Rules for Pennies markdown")
 	dbFile := flag.String("db", "rules.db", "path to rules.db")
-	providerName := flag.String("provider", "", "LLM provider: anthropic, openai, gemini, moonshot")
-	model := flag.String("model", "", "LLM model")
+	providerName := flag.String("provider", "", "company shorthand: anthropic | openai | gemini | moonshot; picks its default writer")
+	model := flag.String("text-model", "", "model that writes (see the ai registry)")
 	flag.Parse()
 
 	if *rawFile == "" {
@@ -142,8 +142,14 @@ func main() {
 	if *model == "" {
 		*model = cfg.DefaultLLMModel
 	}
+	if *model == "" {
+		*model = ai.DefaultWriter[ai.ProviderName(*providerName)]
+	}
 	if *providerName == "" {
 		log.Fatal("provider is required (or set default_llm_provider in ~/.local/share/trueblocks/config.json)")
+	}
+	if *model == "" {
+		log.Fatalf("%s has no default writer in the ai registry; give -text-model", *providerName)
 	}
 
 	provider, err := newProvider(cfg, *providerName)
