@@ -143,7 +143,7 @@ func main() {
 		*model = cfg.DefaultLLMModel
 	}
 	if *model == "" {
-		*model = ai.DefaultWriter[ai.ProviderName(*providerName)]
+		*model, _ = ai.DefaultWriter(ai.ProviderName(*providerName))
 	}
 	if *providerName == "" {
 		log.Fatal("provider is required (or set default_llm_provider in ~/.local/share/trueblocks/config.json)")
