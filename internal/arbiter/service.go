@@ -191,6 +191,9 @@ func (s *Service) callOpenAI(systemPrompt, situation string, addDelay bool) (str
 	}
 
 	log.Printf("[openai] completed tokens_in=%d tokens_out=%d cost=%.6f total_elapsed=%s", result.InputTokens, result.OutputTokens, result.Cost, time.Since(start))
+	if lerr := ai.RecordCall("arbiterd", result, time.Since(start).Seconds()); lerr != nil {
+		log.Printf("[ledger] could not record cost: %v", lerr)
+	}
 
 	return result.Content, result.Cost, throttled, nil
 }
