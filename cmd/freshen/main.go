@@ -412,9 +412,13 @@ func findCached(db *sql.DB, code string) (*cachedRule, error) {
 	return &r, nil
 }
 
-func generate(ctx context.Context, provider ai.Provider, model, promptTemplate string, r parsedRule) (string, float64, error) {
+func renderRulePrompt(promptTemplate string, r parsedRule) string {
 	prompt := strings.ReplaceAll(promptTemplate, "{{TITLE}}", r.Title)
-	prompt = strings.ReplaceAll(prompt, "{{BODY}}", r.FullText)
+	return strings.ReplaceAll(prompt, "{{BODY}}", r.FullText)
+}
+
+func generate(ctx context.Context, provider ai.Provider, model, promptTemplate string, r parsedRule) (string, float64, error) {
+	prompt := renderRulePrompt(promptTemplate, r)
 
 	result, err := provider.Call(ctx, model, prompt, ai.CallOptions{
 		MaxTokens: 300,
