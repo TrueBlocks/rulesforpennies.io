@@ -40,6 +40,12 @@ func main() {
 	appsConfig := flag.String("apps-config", appd.DefaultConfigPath(), "path to apps.json for cross-app nav")
 	flag.Parse()
 
+	// A server refreshes its prompt mirror from source at startup and serves; it
+	// has no artifacts to bless, so it does not halt for adopt.
+	if _, err := cooking.SyncMirror(); err != nil {
+		log.Fatalf("syncing prompts: %v", err)
+	}
+
 	if *dataDir == "" {
 		home, _ := os.UserHomeDir()
 		*dataDir = filepath.Join(home, ".local", "share", "trueblocks", "arbiterd")

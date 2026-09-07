@@ -118,6 +118,12 @@ func main() {
 	model := flag.String("text-model", "", "model that writes (see the ai registry)")
 	flag.Parse()
 
+	if changed, err := cooking.SyncMirror(); err != nil {
+		log.Fatalf("syncing prompts: %v", err)
+	} else if len(changed) > 0 {
+		log.Printf("refreshed %d prompt(s) from changed source", len(changed))
+	}
+
 	if *rawFile == "" {
 		log.Fatal("-raw is required")
 	}
