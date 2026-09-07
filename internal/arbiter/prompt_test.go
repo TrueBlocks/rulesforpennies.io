@@ -7,10 +7,12 @@ import (
 	"testing"
 
 	"github.com/TrueBlocks/rulesforpennies.io/internal/rulesdb"
+	cooking "github.com/TrueBlocks/trueblocks-art/packages/prompt"
 )
 
 func TestBuildPromptInjectsRulesCorpus(t *testing.T) {
-	svc := New(nil, "PERSONA\n\n{{.RulesCorpus}}\n\nEND", nil, nil, nil)
+	t.Setenv("TRUEBLOCKS_DATA_DIR", t.TempDir())
+	svc := New(nil, cooking.New().MustRegister("test/system-prompt.txt", "PERSONA\n\n{{.RulesCorpus}}\n\nEND"), nil, nil, nil)
 	out, err := svc.buildPrompt([]rulesdb.Rule{
 		{Code: "§3.4", Title: "The Sun Factor", FullText: "A penny in sunlight is worth two in shade."},
 	})

@@ -3,12 +3,16 @@ package main
 import (
 	"strings"
 	"testing"
+
+	cooking "github.com/TrueBlocks/trueblocks-art/packages/prompt"
 )
 
-func TestRenderRulePromptFillsTitleAndBody(t *testing.T) {
+func TestRulePromptsFillTitleAndBody(t *testing.T) {
+	t.Setenv("TRUEBLOCKS_DATA_DIR", t.TempDir())
 	r := parsedRule{Title: "The Sun Factor", FullText: "A penny found in sunlight is worth two in shade."}
+	data := struct{ Title, Body string }{r.Title, r.FullText}
 
-	summary, err := renderRulePrompt(summaryPrompt, r)
+	summary, err := summaryPrompt.Fill(data)
 	if err != nil {
 		t.Fatalf("rendering summary prompt: %v", err)
 	}
@@ -22,7 +26,7 @@ func TestRenderRulePromptFillsTitleAndBody(t *testing.T) {
 		t.Error("summary prompt lost its instruction")
 	}
 
-	keywords, err := renderRulePrompt(keywordsPrompt, r)
+	keywords, err := keywordsPrompt.Fill(data)
 	if err != nil {
 		t.Fatalf("rendering keywords prompt: %v", err)
 	}
@@ -34,9 +38,9 @@ func TestRenderRulePromptFillsTitleAndBody(t *testing.T) {
 	}
 }
 
-func TestRuleConstPromptsCarryTheirSlots(t *testing.T) {
-	for name, tmpl := range map[string]string{"summary": summaryPrompt, "keywords": keywordsPrompt} {
-		if !strings.Contains(tmpl, "{{.Title}}") || !strings.Contains(tmpl, "{{.Body}}") {
+func TestRulePromptsCarryTheirSlots(t *testing.T) {
+	for name, p := range map[string]*cooking.Prompt{"summary": summaryPrompt, "keywords": keywordsPrompt} {
+		if !strings.Contains(p.Text(), "{{.Title}}") || !strings.Contains(p.Text(), "{{.Body}}") {
 			t.Errorf("%s prompt is missing a title or body slot", name)
 		}
 	}

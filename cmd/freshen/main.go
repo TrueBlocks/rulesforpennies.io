@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	_ "embed"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -11,10 +12,10 @@ import (
 	"os"
 	"regexp"
 	"strings"
-	"text/template"
 	"time"
 
 	"github.com/TrueBlocks/trueblocks-art/packages/ai"
+	cooking "github.com/TrueBlocks/trueblocks-art/packages/prompt"
 	_ "modernc.org/sqlite"
 )
 
@@ -60,27 +61,16 @@ CREATE TRIGGER IF NOT EXISTS rules_au AFTER UPDATE ON rules BEGIN
 END;
 `
 
-const summaryPrompt = `You are summarizing rules from a humorous rulebook about picking up pennies.
+//go:embed prompts/summary.md
+var summaryPromptText string
 
-Given the following rule title and full text, write a single concise sentence that captures the operative condition or instruction of the rule. Ignore narrative flavor, anecdotes, examples, and recorded dates. Focus only on what a player must, may, or must not do.
+//go:embed prompts/keywords.md
+var keywordsPromptText string
 
-Rule title: {{.Title}}
-
-Rule text:
-{{.Body}}
-
-Concise one-sentence summary:`
-
-const keywordsPrompt = `You are extracting keywords from a rule in a humorous rulebook about picking up pennies.
-
-Given the following rule title and full text, return a comma-separated list of 5–15 meaningful keywords or short phrases that would help searchers find this rule. Include important nouns, actions, locations, and concepts. Do not include common stop words.
-
-Rule title: {{.Title}}
-
-Rule text:
-{{.Body}}
-
-Comma-separated keywords:`
+var (
+	summaryPrompt  = cooking.MustRegister("pennies/cmd/freshen/prompts/summary.md", summaryPromptText)
+	keywordsPrompt = cooking.MustRegister("pennies/cmd/freshen/prompts/keywords.md", keywordsPromptText)
+)
 
 var (
 	majorSectionRe     = regexp.MustCompile(`^(\d+)\.00\s+(.+)$`)
@@ -413,20 +403,8 @@ func findCached(db *sql.DB, code string) (*cachedRule, error) {
 	return &r, nil
 }
 
-func renderRulePrompt(promptTemplate string, r parsedRule) (string, error) {
-	tmpl, err := template.New("rule").Parse(promptTemplate)
-	if err != nil {
-		return "", fmt.Errorf("parsing rule prompt: %w", err)
-	}
-	var b strings.Builder
-	if err := tmpl.Execute(&b, struct{ Title, Body string }{r.Title, r.FullText}); err != nil {
-		return "", fmt.Errorf("rendering rule prompt: %w", err)
-	}
-	return b.String(), nil
-}
-
-func generate(ctx context.Context, provider ai.Provider, model, promptTemplate string, r parsedRule) (string, float64, error) {
-	prompt, err := renderRulePrompt(promptTemplate, r)
+func generate(ctx context.Context, provider ai.Provider, model string, rulePrompt *cooking.Prompt, r parsedRule) (string, float64, error) {
+	prompt, err := rulePrompt.Fill(struct{ Title, Body string }{r.Title, r.FullText})
 	if err != nil {
 		return "", 0, err
 	}

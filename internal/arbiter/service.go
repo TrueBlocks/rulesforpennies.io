@@ -10,13 +10,13 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"text/template"
 	"time"
 
 	"github.com/TrueBlocks/rulesforpennies.io/internal/ratelimit"
 	"github.com/TrueBlocks/rulesforpennies.io/internal/rulesdb"
 	"github.com/TrueBlocks/rulesforpennies.io/internal/suggestions"
 	"github.com/TrueBlocks/trueblocks-art/packages/ai"
+	cooking "github.com/TrueBlocks/trueblocks-art/packages/prompt"
 )
 
 const adminToken = "penny1793"
@@ -24,20 +24,20 @@ const adminToken = "penny1793"
 var substantiveRuleRe = regexp.MustCompile(`§[2-6]\.\d`)
 
 type Service struct {
-	provider       ai.Provider
-	promptTemplate string
-	rulesDB        *rulesdb.DB
-	limiter        *ratelimit.Limiter
-	suggestions    *suggestions.Store
+	provider    ai.Provider
+	prompt      *cooking.Prompt
+	rulesDB     *rulesdb.DB
+	limiter     *ratelimit.Limiter
+	suggestions *suggestions.Store
 }
 
-func New(provider ai.Provider, promptTemplate string, db *rulesdb.DB, limiter *ratelimit.Limiter, sg *suggestions.Store) *Service {
+func New(provider ai.Provider, prompt *cooking.Prompt, db *rulesdb.DB, limiter *ratelimit.Limiter, sg *suggestions.Store) *Service {
 	return &Service{
-		provider:       provider,
-		promptTemplate: promptTemplate,
-		rulesDB:        db,
-		limiter:        limiter,
-		suggestions:    sg,
+		provider:    provider,
+		prompt:      prompt,
+		rulesDB:     db,
+		limiter:     limiter,
+		suggestions: sg,
 	}
 }
 
@@ -175,15 +175,7 @@ func (s *Service) HandleRuling(w http.ResponseWriter, r *http.Request) {
 
 func (s *Service) buildPrompt(rules []rulesdb.Rule) (string, error) {
 	corpus := rulesdb.FormatForPrompt(rules)
-	tmpl, err := template.New("system").Parse(s.promptTemplate)
-	if err != nil {
-		return "", fmt.Errorf("parsing system prompt: %w", err)
-	}
-	var b strings.Builder
-	if err := tmpl.Execute(&b, struct{ RulesCorpus string }{corpus}); err != nil {
-		return "", fmt.Errorf("rendering system prompt: %w", err)
-	}
-	return b.String(), nil
+	return s.prompt.Fill(struct{ RulesCorpus string }{corpus})
 }
 
 func (s *Service) callOpenAI(systemPrompt, situation string, addDelay bool) (string, float64, bool, error) {

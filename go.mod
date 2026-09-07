@@ -5,10 +5,13 @@ go 1.25.9
 require (
 	github.com/TrueBlocks/trueblocks-art/packages/ai v0.0.0-00010101000000-000000000000
 	github.com/TrueBlocks/trueblocks-art/packages/appd v0.0.0-00010101000000-000000000000
+	github.com/TrueBlocks/trueblocks-art/packages/prompt v0.0.0-00010101000000-000000000000
 	modernc.org/sqlite v1.52.0
 )
 
 replace github.com/TrueBlocks/trueblocks-art/packages/ai => ../packages/ai
+
+replace github.com/TrueBlocks/trueblocks-art/packages/prompt => ../packages/prompt
 
 replace github.com/TrueBlocks/trueblocks-art/packages/creds => ../packages/creds
 

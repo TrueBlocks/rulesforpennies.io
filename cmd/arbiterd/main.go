@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"flag"
 	"log"
@@ -19,13 +20,19 @@ import (
 	"github.com/TrueBlocks/rulesforpennies.io/internal/suggestions"
 	"github.com/TrueBlocks/trueblocks-art/packages/ai"
 	"github.com/TrueBlocks/trueblocks-art/packages/appd"
+	cooking "github.com/TrueBlocks/trueblocks-art/packages/prompt"
 )
+
+//go:embed system-prompt.txt
+var systemPromptText string
+
+var systemPrompt = cooking.MustRegister("pennies/cmd/arbiterd/system-prompt.txt", systemPromptText)
 
 func main() {
 	addr := flag.String("addr", ":8080", "listen address")
 	dataDir := flag.String("data", "", "data directory (default: ~/.local/share/trueblocks/arbiterd)")
 	dbFile := flag.String("db", "", "path to rules.db SQLite database")
-	promptFile := flag.String("prompt", "", "path to system prompt template file")
+	promptFile := flag.String("prompt", "", "override the built-in system prompt with a file")
 	dailyCap := flag.Float64("daily-cap", 10.0, "daily spend cap in USD")
 	devMode := flag.Bool("dev", false, "enable dev mode (CORS for localhost)")
 	logFile := flag.String("log", "", "path to log file (default: stderr)")
@@ -65,12 +72,13 @@ func main() {
 	}
 	defer db.Close()
 
-	if *promptFile == "" {
-		log.Fatal("-prompt flag is required (path to system prompt template)")
-	}
-	promptTemplate, err := os.ReadFile(*promptFile)
-	if err != nil {
-		log.Fatalf("cannot read prompt file: %v", err)
+	promptTmpl := systemPrompt
+	if *promptFile != "" {
+		data, err := os.ReadFile(*promptFile)
+		if err != nil {
+			log.Fatalf("cannot read prompt file: %v", err)
+		}
+		promptTmpl = cooking.New().MustRegister(*promptFile, string(data))
 	}
 
 	if *publicDir == "" {
@@ -86,7 +94,7 @@ func main() {
 	}
 	defer sg.Close()
 
-	svc := arbiter.New(provider, string(promptTemplate), db, limiter, sg)
+	svc := arbiter.New(provider, promptTmpl, db, limiter, sg)
 
 	mux := http.NewServeMux()
 	if _, err := appd.RegisterNav(mux, *appsConfig); err != nil {
