@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/TrueBlocks/rulesforpennies.io/internal/ratelimit"
@@ -118,7 +119,12 @@ func (s *Service) HandleRuling(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("[request] rules search returned %d rules elapsed=%s", len(rules), time.Since(start))
 
-	prompt := s.buildPrompt(rules)
+	prompt, err := s.buildPrompt(rules)
+	if err != nil {
+		log.Printf("[request] prompt build error: %v", err)
+		writeError(w, http.StatusInternalServerError, "the arbiter is temporarily indisposed", "prompt_error")
+		return
+	}
 	log.Printf("[request] calling OpenAI soft=%v elapsed=%s", status.SoftCapped, time.Since(start))
 	ruling, cost, throttled, err := s.callOpenAI(prompt, req.Situation, status.SoftCapped)
 	if err != nil {
@@ -167,9 +173,17 @@ func (s *Service) HandleRuling(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[request] response sent deflected=%v throttled=%v total_elapsed=%s", deflected, throttled, time.Since(start))
 }
 
-func (s *Service) buildPrompt(rules []rulesdb.Rule) string {
+func (s *Service) buildPrompt(rules []rulesdb.Rule) (string, error) {
 	corpus := rulesdb.FormatForPrompt(rules)
-	return strings.Replace(s.promptTemplate, "{{RULES_CORPUS}}", corpus, 1)
+	tmpl, err := template.New("system").Parse(s.promptTemplate)
+	if err != nil {
+		return "", fmt.Errorf("parsing system prompt: %w", err)
+	}
+	var b strings.Builder
+	if err := tmpl.Execute(&b, struct{ RulesCorpus string }{corpus}); err != nil {
+		return "", fmt.Errorf("rendering system prompt: %w", err)
+	}
+	return b.String(), nil
 }
 
 func (s *Service) callOpenAI(systemPrompt, situation string, addDelay bool) (string, float64, bool, error) {

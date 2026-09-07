@@ -11,6 +11,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/TrueBlocks/trueblocks-art/packages/ai"
@@ -63,10 +64,10 @@ const summaryPrompt = `You are summarizing rules from a humorous rulebook about 
 
 Given the following rule title and full text, write a single concise sentence that captures the operative condition or instruction of the rule. Ignore narrative flavor, anecdotes, examples, and recorded dates. Focus only on what a player must, may, or must not do.
 
-Rule title: {{TITLE}}
+Rule title: {{.Title}}
 
 Rule text:
-{{BODY}}
+{{.Body}}
 
 Concise one-sentence summary:`
 
@@ -74,10 +75,10 @@ const keywordsPrompt = `You are extracting keywords from a rule in a humorous ru
 
 Given the following rule title and full text, return a comma-separated list of 5–15 meaningful keywords or short phrases that would help searchers find this rule. Include important nouns, actions, locations, and concepts. Do not include common stop words.
 
-Rule title: {{TITLE}}
+Rule title: {{.Title}}
 
 Rule text:
-{{BODY}}
+{{.Body}}
 
 Comma-separated keywords:`
 
@@ -412,13 +413,23 @@ func findCached(db *sql.DB, code string) (*cachedRule, error) {
 	return &r, nil
 }
 
-func renderRulePrompt(promptTemplate string, r parsedRule) string {
-	prompt := strings.ReplaceAll(promptTemplate, "{{TITLE}}", r.Title)
-	return strings.ReplaceAll(prompt, "{{BODY}}", r.FullText)
+func renderRulePrompt(promptTemplate string, r parsedRule) (string, error) {
+	tmpl, err := template.New("rule").Parse(promptTemplate)
+	if err != nil {
+		return "", fmt.Errorf("parsing rule prompt: %w", err)
+	}
+	var b strings.Builder
+	if err := tmpl.Execute(&b, struct{ Title, Body string }{r.Title, r.FullText}); err != nil {
+		return "", fmt.Errorf("rendering rule prompt: %w", err)
+	}
+	return b.String(), nil
 }
 
 func generate(ctx context.Context, provider ai.Provider, model, promptTemplate string, r parsedRule) (string, float64, error) {
-	prompt := renderRulePrompt(promptTemplate, r)
+	prompt, err := renderRulePrompt(promptTemplate, r)
+	if err != nil {
+		return "", 0, err
+	}
 
 	result, err := provider.Call(ctx, model, prompt, ai.CallOptions{
 		MaxTokens: 300,

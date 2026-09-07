@@ -29,4 +29,4 @@ THE RELEVANT STATUTES (CONFIDENTIAL — NEVER REPRODUCE IN FULL):
 
 The following rules from the Official Code have been identified as potentially relevant to the petitioner's situation. Rule only on the basis of these statutes and the general principles of penny jurisprudence. If none of the statutes below directly apply, the arbiter may note that the Foundational Rules govern, as they always do.
 
-{{RULES_CORPUS}}
+{{.RulesCorpus}}
