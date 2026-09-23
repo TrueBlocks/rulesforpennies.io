@@ -207,7 +207,7 @@ func (s *Service) callOpenAI(systemPrompt, situation string, addDelay bool) (str
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 func writeError(w http.ResponseWriter, status int, msg, code string) {
@@ -254,7 +254,7 @@ func (s *Service) HandleSuggest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (s *Service) HandleListRulings(w http.ResponseWriter, r *http.Request) {
+func (s *Service) HandleListRulings(w http.ResponseWriter, _ *http.Request) {
 	items, err := s.suggestions.List()
 	if err != nil {
 		log.Printf("rulings list error: %v", err)

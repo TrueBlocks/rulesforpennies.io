@@ -111,9 +111,9 @@ func main() {
 	mux.HandleFunc("POST /suggest", svc.HandleSuggest)
 	mux.HandleFunc("GET /rulings", svc.HandleListRulings)
 	mux.HandleFunc("DELETE /rulings/{id}", svc.HandleDeleteRuling)
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"status":"ok","version":"2026-06-29i"}`))
+		_, _ = w.Write([]byte(`{"status":"ok","version":"2026-06-29i"}`))
 	})
 
 	// Static files from pennies/public. API routes above take precedence.

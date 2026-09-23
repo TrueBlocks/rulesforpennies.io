@@ -7,6 +7,7 @@ build:
 clean:
 
 lint:
+	@golangci-lint run ./...
 
 add:
 	@git add -A

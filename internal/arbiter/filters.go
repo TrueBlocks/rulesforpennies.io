@@ -101,9 +101,5 @@ func checkOutputFilters(output string) bool {
 			matchCount++
 		}
 	}
-	if matchCount >= 2 {
-		return true
-	}
-
-	return false
+	return matchCount >= 2
 }

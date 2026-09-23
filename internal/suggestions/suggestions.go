@@ -49,7 +49,9 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) SaveRuling(slug, situation, ruling string, rulesJSON []byte) error {
-	s.db.Exec(`DELETE FROM rulings WHERE slug = ?`, slug)
+	if _, err := s.db.Exec(`DELETE FROM rulings WHERE slug = ?`, slug); err != nil {
+		return fmt.Errorf("deleting prior ruling for %s: %w", slug, err)
+	}
 	_, err := s.db.Exec(
 		`INSERT INTO rulings (slug, situation, ruling, rules_json, created_at) VALUES (?, ?, ?, ?, ?)`,
 		slug, situation, ruling, string(rulesJSON), time.Now().UTC().Format(time.RFC3339),

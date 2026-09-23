@@ -1,0 +1,61 @@
+version: "2"
+run:
+  modules-download-mode: readonly
+linters:
+  default: none
+  enable:
+    - errcheck
+    - goconst
+    - govet
+    - ineffassign
+    - misspell
+    - revive
+    - staticcheck
+    - unused
+  settings:
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+    revive:
+      rules:
+        - name: unused-parameter
+          severity: warning
+    staticcheck:
+      checks:
+        - all
+        - -QF1008 # could remove embedded field from selector
+        - -QF1006 # could lift into loop condition
+        - -ST1003 # should not use MixedCaps in package name
+        - -ST1016 # methods on the same type should have the same receiver name
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - errcheck
+          - goconst
+          - ineffassign
+          - misspell
+          - revive
+          - staticcheck
+          - unused
+        path: _test\.go
+    paths:
+      - third_party$
+      - builtin$
+formatters:
+  enable:
+    - gofmt
+  settings:
+    gofmt:
+      simplify: true
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - _test\.go
