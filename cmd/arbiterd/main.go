@@ -38,6 +38,8 @@ func main() {
 	logFile := flag.String("log", "", "path to log file (default: stderr)")
 	publicDir := flag.String("public", "", "path to pennies/public static files")
 	appsConfig := flag.String("apps-config", appd.DefaultConfigPath(), "path to apps.json for cross-app nav")
+	spend := flag.String("spend", ai.TierCheap, "cheap | pro — the model tier")
+	textModel := flag.String("text-model", "", "model that writes rulings (see the ai registry)")
 	flag.Parse()
 
 	// A server refreshes its prompt mirror from source at startup and serves; it
@@ -67,7 +69,22 @@ func main() {
 	if err != nil {
 		log.Fatalf("cannot load AI config: %v", err)
 	}
-	provider := cfg.NewOpenAI()
+	// Rulings come from the registry's compose model at -spend, at that tier's
+	// effort, unless -text-model names another writer.
+	model, spec, effort, err := ai.TierWriter(*spend, *textModel)
+	if err != nil {
+		log.Fatalf("choosing the model: %v", err)
+	}
+	var provider ai.Provider
+	switch spec.Provider {
+	case ai.ProviderAnthropic:
+		provider = cfg.NewAnthropic()
+	case ai.ProviderOpenAI:
+		provider = cfg.NewOpenAI()
+	default:
+		log.Fatalf("arbiterd calls Anthropic or OpenAI; %s is a %s model", model, spec.Provider)
+	}
+	log.Printf("rulings use %s (effort %q)", model, effort)
 
 	if *dbFile == "" {
 		log.Fatal("-db flag is required (path to rules.db)")
@@ -100,7 +117,7 @@ func main() {
 	}
 	defer sg.Close()
 
-	svc := arbiter.New(provider, promptTmpl, db, limiter, sg)
+	svc := arbiter.New(provider, model, effort, promptTmpl, db, limiter, sg)
 
 	mux := http.NewServeMux()
 	if _, err := appd.RegisterNav(mux, *appsConfig); err != nil {

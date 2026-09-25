@@ -115,7 +115,8 @@ func main() {
 	rawFile := flag.String("raw", "", "path to raw Rules for Pennies markdown")
 	dbFile := flag.String("db", "rules.db", "path to rules.db")
 	providerName := flag.String("provider", "", "company shorthand: anthropic | openai | gemini | moonshot; picks its default writer")
-	model := flag.String("text-model", "", "model that writes (see the ai registry)")
+	spend := flag.String("spend", ai.TierCheap, "cheap | pro — the model tier")
+	textModel := flag.String("text-model", "", "model that writes (see the ai registry)")
 	flag.Parse()
 
 	if changed, err := cooking.SyncMirror(); err != nil {
@@ -133,23 +134,23 @@ func main() {
 		log.Fatalf("loading shared config: %v", err)
 	}
 
-	if *providerName == "" {
-		*providerName = cfg.DefaultLLMProvider
+	// The model is the registry's compose role at -spend with the tier's effort;
+	// -provider picks that company's default writer instead, and -text-model
+	// names one outright.
+	explicit := *textModel
+	if explicit == "" && *providerName != "" {
+		def, ok := ai.DefaultWriter(ai.ProviderName(*providerName))
+		if !ok {
+			log.Fatalf("%s has no default writer in the ai registry; give -text-model", *providerName)
+		}
+		explicit = def
 	}
-	if *model == "" {
-		*model = cfg.DefaultLLMModel
-	}
-	if *model == "" {
-		*model, _ = ai.DefaultWriter(ai.ProviderName(*providerName))
-	}
-	if *providerName == "" {
-		log.Fatal("provider is required (or set default_llm_provider in ~/.local/share/trueblocks/config.json)")
-	}
-	if *model == "" {
-		log.Fatalf("%s has no default writer in the ai registry; give -text-model", *providerName)
+	model, spec, effort, err := ai.TierWriter(*spend, explicit)
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	provider, err := newProvider(cfg, *providerName)
+	provider, err := newProvider(cfg, string(spec.Provider))
 	if err != nil {
 		log.Fatalf("creating provider: %v", err)
 	}
@@ -196,7 +197,7 @@ func main() {
 		}
 		fmt.Printf("%s %s — %s (summary)...", r.Code, r.Title, status)
 
-		summary, cost, err := generate(ctx, provider, *model, summaryPrompt, r)
+		summary, cost, err := generate(ctx, provider, model, effort, summaryPrompt, r)
 		if err != nil {
 			log.Fatalf("generating summary for %s: %v", r.Code, err)
 		}
@@ -204,7 +205,7 @@ func main() {
 		s.llmCalls++
 
 		fmt.Printf(" keywords...")
-		keywords, cost, err := generate(ctx, provider, *model, keywordsPrompt, r)
+		keywords, cost, err := generate(ctx, provider, model, effort, keywordsPrompt, r)
 		if err != nil {
 			log.Fatalf("generating keywords for %s: %v", r.Code, err)
 		}
@@ -409,7 +410,7 @@ func findCached(db *sql.DB, code string) (*cachedRule, error) {
 	return &r, nil
 }
 
-func generate(ctx context.Context, provider ai.Provider, model string, rulePrompt *cooking.Prompt, r parsedRule) (string, float64, error) {
+func generate(ctx context.Context, provider ai.Provider, model, effort string, rulePrompt *cooking.Prompt, r parsedRule) (string, float64, error) {
 	prompt, err := rulePrompt.Fill(struct{ Title, Body string }{r.Title, r.FullText})
 	if err != nil {
 		return "", 0, err
@@ -418,6 +419,7 @@ func generate(ctx context.Context, provider ai.Provider, model string, rulePromp
 	result, err := provider.Call(ctx, model, prompt, ai.CallOptions{
 		MaxTokens: 300,
 		Timeout:   2 * time.Minute,
+		Effort:    effort,
 	})
 	if err != nil {
 		return "", 0, err

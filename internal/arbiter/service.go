@@ -25,15 +25,21 @@ var substantiveRuleRe = regexp.MustCompile(`§[2-6]\.\d`)
 
 type Service struct {
 	provider    ai.Provider
+	model       string
+	effort      string
 	prompt      *cooking.Prompt
 	rulesDB     *rulesdb.DB
 	limiter     *ratelimit.Limiter
 	suggestions *suggestions.Store
 }
 
-func New(provider ai.Provider, prompt *cooking.Prompt, db *rulesdb.DB, limiter *ratelimit.Limiter, sg *suggestions.Store) *Service {
+// New builds the arbiter around one model: provider must be the client for
+// model's company, and effort is the tier's reasoning effort (empty sends none).
+func New(provider ai.Provider, model, effort string, prompt *cooking.Prompt, db *rulesdb.DB, limiter *ratelimit.Limiter, sg *suggestions.Store) *Service {
 	return &Service{
 		provider:    provider,
+		model:       model,
+		effort:      effort,
 		prompt:      prompt,
 		rulesDB:     db,
 		limiter:     limiter,
@@ -125,14 +131,14 @@ func (s *Service) HandleRuling(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "the arbiter is temporarily indisposed", "prompt_error")
 		return
 	}
-	log.Printf("[request] calling OpenAI soft=%v elapsed=%s", status.SoftCapped, time.Since(start))
-	ruling, cost, throttled, err := s.callOpenAI(prompt, req.Situation, status.SoftCapped)
+	log.Printf("[request] calling %s soft=%v elapsed=%s", s.model, status.SoftCapped, time.Since(start))
+	ruling, cost, throttled, err := s.callModel(prompt, req.Situation, status.SoftCapped)
 	if err != nil {
-		log.Printf("[request] OpenAI error after %s: %v", time.Since(start), err)
+		log.Printf("[request] %s error after %s: %v", s.model, time.Since(start), err)
 		writeError(w, http.StatusInternalServerError, "the arbiter is temporarily indisposed", "api_error")
 		return
 	}
-	log.Printf("[request] OpenAI returned cost=%.6f throttled=%v elapsed=%s", cost, throttled, time.Since(start))
+	log.Printf("[request] %s returned cost=%.6f throttled=%v elapsed=%s", s.model, cost, throttled, time.Since(start))
 
 	if leaked := checkOutputFilters(ruling); leaked {
 		log.Printf("[request] output filter triggered for session %s", sessionToken)
@@ -178,25 +184,26 @@ func (s *Service) buildPrompt(rules []rulesdb.Rule) (string, error) {
 	return s.prompt.Fill(struct{ RulesCorpus string }{corpus})
 }
 
-func (s *Service) callOpenAI(systemPrompt, situation string, addDelay bool) (string, float64, bool, error) {
+func (s *Service) callModel(systemPrompt, situation string, addDelay bool) (string, float64, bool, error) {
 	start := time.Now()
 	throttled := false
 	if addDelay {
 		throttled = true
-		log.Printf("[openai] soft cap reached: applying 500ms throttle")
+		log.Printf("[model] soft cap reached: applying 500ms throttle")
 		time.Sleep(500 * time.Millisecond)
 	}
 
 	prompt := systemPrompt + "\n\n" + situation
-	result, err := s.provider.Call(context.Background(), "gpt-4o", prompt, ai.CallOptions{
+	result, err := s.provider.Call(context.Background(), s.model, prompt, ai.CallOptions{
 		MaxTokens: 500,
 		Timeout:   60 * time.Second,
+		Effort:    s.effort,
 	})
 	if err != nil {
 		return "", 0, false, fmt.Errorf("api call: %w", err)
 	}
 
-	log.Printf("[openai] completed tokens_in=%d tokens_out=%d cost=%.6f total_elapsed=%s", result.InputTokens, result.OutputTokens, result.Cost, time.Since(start))
+	log.Printf("[model] %s completed tokens_in=%d tokens_out=%d cost=%.6f total_elapsed=%s", s.model, result.InputTokens, result.OutputTokens, result.Cost, time.Since(start))
 	if lerr := ai.RecordCall("arbiterd", result, time.Since(start).Seconds()); lerr != nil {
 		log.Printf("[ledger] could not record cost: %v", lerr)
 	}
