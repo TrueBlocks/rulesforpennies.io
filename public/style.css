@@ -24,27 +24,32 @@ body {
   flex-direction: column;
 }
 
+/* The status sits in the banner's top-right corner, out of the flow, so it
+   never adds height to the banner. */
 .arbiter-status {
-  padding: 0.6rem 1rem;
-  text-align: center;
-  font-size: 0.85rem;
+  position: absolute;
+  top: 0.6rem;
+  right: 1rem;
+  max-width: 40%;
+  padding: 0.15rem 0.6rem;
+  font-size: 0.7rem;
   font-weight: bold;
-  border-bottom: 1px solid transparent;
+  line-height: 1.4;
+  text-align: right;
+  border: 1px solid transparent;
+  border-radius: 999px;
 }
 .arbiter-status--checking {
-  background: #fff8e1;
-  color: var(--ink-light);
-  border-bottom-color: #e0d2a0;
+  color: #d9c9a3;
+  border-color: rgba(217, 201, 163, 0.4);
 }
 .arbiter-status--ok {
-  background: #e8f5e9;
-  color: #2e7d32;
-  border-bottom-color: #a5d6a7;
+  color: #8fd19e;
+  border-color: rgba(143, 209, 158, 0.4);
 }
 .arbiter-status--error {
-  background: #ffebee;
-  color: var(--seal-red);
-  border-bottom-color: #ef9a9a;
+  color: #ff9e8a;
+  border-color: rgba(255, 158, 138, 0.5);
 }
 
 .arbiter-unavailable {
@@ -54,6 +59,7 @@ body {
 }
 
 header {
+  position: relative;
   background: var(--ink);
   color: var(--parchment);
   padding: 1rem 2rem;
